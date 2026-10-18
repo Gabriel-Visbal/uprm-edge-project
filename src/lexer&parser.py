@@ -1,9 +1,21 @@
+"""UPRM-Edge Subproject 1: lexer and parser for the UPRM-Edge language.
+
+The program reads one .uedge source file, recognizes its tokens and grammar,
+and reports either a parsing result or a clear error with its source line.
+"""
+
 import sys
+
 sys.path.insert(0, 'ply.zip')
+
 import ply.lex as lex
 import ply.yacc as yacc
 
-hadError = False
+# ============================================================================
+# Configuration
+# ============================================================================
+
+had_error = False
 
 # PLY would otherwise use the first p_* function as the start rule.
 start = 'program'
@@ -11,8 +23,12 @@ start = 'program'
 class LexicalError(Exception):
     """Stops parsing after a reported lexical error without a traceback."""
 
-# Keywords
-keywords = {
+# ============================================================================
+# Lexer
+# ============================================================================
+
+# Language keywords and their corresponding PLY token names.
+KEYWORDS = {
     'let': 'LET',
     'func': 'FUNC',
     'if': 'IF',
@@ -31,6 +47,7 @@ keywords = {
     'string': 'STRING_TYPE',
 }
 
+# PLY requires this module-level variable to be named ``tokens``.
 tokens = [
     'IDENTIFIER', 'INTEGER', 'FLOAT', 'STRING', 'BOOLEAN',
     'LET', 'FUNC', 'IF', 'ELSE', 'WHILE', 'FOR', 'RETURN', 'PRINT', 'MEMORY',
@@ -43,7 +60,7 @@ tokens = [
     'COMMA', 'SEMICOLON'
 ]
 
-# Operators
+# Operator patterns
 t_EQUAL = r'=='
 t_NOTEQUAL = r'!='
 t_LESSEQUAL = r'<='
@@ -59,7 +76,7 @@ t_TIMES = r'\*'
 t_DIVIDE = r'/'
 t_MODULO = r'%'
 
-# Symbols
+# Punctuation patterns
 t_LEFTPARENTHESIS = r'\('
 t_RIGHTPARENTHESIS = r'\)'
 t_LEFTBRACE = r'\{'
@@ -67,13 +84,13 @@ t_RIGHTBRACE = r'\}'
 t_COMMA = r','
 t_SEMICOLON = r';'
 
-# Ignore spaces and tabs
+# Whitespace ignored by the lexer
 t_ignore = ' \t'
 
-# Units of memory
-MEMORY_UNITS = {'b': 1, 'kb': 1024, 'mb': 1024 ** 2, 'gb': 1024 ** 3}
+# Memory-size units accepted by the Track A annotation.
+MEMORY_UNITS = {'b': 1, 'kb': 1024, 'mb': 1024**2, 'gb': 1024**3}
 
-# Split the @memory annotations into number and unit
+# Split an @memory size into a numeric value expressed in bytes.
 def t_MEMORYSIZE(t):
     r'\d+(?:kb|mb|gb|b)\b'
     digits = t.value.rstrip('kmgb')
@@ -81,45 +98,41 @@ def t_MEMORYSIZE(t):
     t.value = int(digits) * MEMORY_UNITS[unit]
     return t
 
-# Floats
 def t_FLOAT(t):
     r'\d+\.\d+'
     t.value = float(t.value)
     return t
 
-# Integers
 def t_INTEGER(t):
     r'\d+'
     t.value = int(t.value)
     return t
 
-# Strings
 def t_STRING(t):
     r'"([^"\\\n]|\\.)*"'
     t.value = t.value[1:-1]
     return t
 
-# Check if a word is a keyword or a variable, if its a boolean it converts it to an actual boolean value
 def t_IDENTIFIER(t):
     r'[a-zA-Z_][a-zA-Z_0-9]*'
-    t.type = keywords.get(t.value, 'IDENTIFIER')
+    t.type = KEYWORDS.get(t.value, 'IDENTIFIER')
     if t.type == 'BOOLEAN':
         t.value = (t.value == 'true')
     return t
 
-# Ignore comments
+# Single-line comments do not produce tokens.
 def t_COMMENT(t):
     r'//[^\n]*'
     pass
 
-# Keep track of what line we are in
+# Preserve accurate line numbers for later error messages.
 def t_newline(t):
     r'\n+'
     t.lexer.lineno += len(t.value)
 
 def t_error(t):
-    global hadError
-    hadError = True
+    global had_error
+    had_error = True
     if t.value[0] == '"':
         print(f"Error: malformed string at line {t.lineno}")
     else:
@@ -130,16 +143,19 @@ def t_error(t):
 
 def report_error(message, line):
     """Record one syntax error without claiming that parsing succeeded."""
-    global hadError
-    hadError = True
+    global had_error
+    had_error = True
     if line is None:
         print(f"Error: {message}")
     else:
         print(f"Error: {message} at line {line}")
 
-# Grammar -----------------------------------------------------------------
-# These productions describe the language; none of the expected test output
-# is selected from a file name or hardcoded from a test case.
+# ============================================================================
+# Parser grammar
+# ============================================================================
+
+# These productions recognize the language structure and produce a compact
+# parse representation that can be reused by the interpreter in Subproject 2.
 
 precedence = (
     ('left', 'EQUAL', 'NOTEQUAL'),
@@ -314,8 +330,8 @@ def p_empty(p):
 
 def p_error(token):
     """Fallback for syntax errors not covered by a targeted production."""
-    global hadError
-    hadError = True
+    global had_error
+    had_error = True
     if token is None:
         print("Error: unexpected end of file")
     else:
@@ -323,38 +339,43 @@ def p_error(token):
 
 lexer = lex.lex()
 
+
+# ============================================================================
+# Command-line interface
+# ============================================================================
+
 def main():
-    global hadError
+    global had_error
 
     if len(sys.argv) != 2:
         print("Use: python your_parser.py <archivo>.uedge")
         sys.exit(1)
 
-    route = sys.argv[1]
+    source_path = sys.argv[1]
 
-    if not route.endswith(".uedge"):
+    if not source_path.endswith(".uedge"):
         print("Error: the file needs .uedge extension.")
         sys.exit(1)
 
     try:
-        with open(route, "r", encoding="utf-8") as file:
-            code = file.read()
+        with open(source_path, "r", encoding="utf-8") as source_file:
+            source_code = source_file.read()
     except FileNotFoundError:
-        print(f"Error: file not found '{route}'")
+        print(f"Error: file not found '{source_path}'")
         sys.exit(1)
 
     # parser.parse() feeds the source into the lexer itself.  Do not consume
     # tokens beforehand, or a later parser pass would receive an empty stream.
     # Keep this call compatible with the older PLY version used by the grader.
     parser = yacc.yacc(debug=False)
-    hadError = False
+    had_error = False
     lexer.lineno = 1
     try:
-        parser.parse(code, lexer=lexer)
+        parser.parse(source_code, lexer=lexer)
     except LexicalError:
         return
 
-    if not hadError:
+    if not had_error:
         print("Parsed successfully")
 
 if __name__ == "__main__":
